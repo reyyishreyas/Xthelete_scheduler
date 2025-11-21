@@ -9,7 +9,7 @@ from datetime import datetime
 import pandas as pd
 import io
 import csv
-
+from app.models.schemas import KnockoutRequest
 from .models.schemas import *
 from .supabase_client import get_db, SupabaseClient
 
