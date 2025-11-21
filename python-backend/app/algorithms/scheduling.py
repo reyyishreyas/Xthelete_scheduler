@@ -13,9 +13,9 @@ class SmartSchedulingEngine:
     
     def __init__(self, constraints: Dict = None):
         self.constraints = {
-            'match_duration': 60,  # 1 hour default
-            'minimum_rest_time': 30,  # 30 minutes default
-            'buffer_time': 15,  # 15 minutes default
+            'match_duration': 60,  
+            'minimum_rest_time': 30,  
+            'buffer_time': 15,  
             'max_matches_per_day': 8,
             'working_hours_start': 8,
             'working_hours_end': 22,
@@ -101,14 +101,12 @@ class SmartSchedulingEngine:
 
         court_time, court = heapq.heappop(self.courts_heap)
 
-        # Calculate earliest start time considering player rest
         earliest_start_time = self.calculate_earliest_start_time(
             court_time, match['player1']['id'], match['player2']['id']
         )
 
         scheduled_end_time = earliest_start_time + timedelta(minutes=self.constraints['match_duration'])
 
-        # Create scheduled match
         scheduled_match = {
             'id': f'match-{match_index + 1}',
             'match': match,
