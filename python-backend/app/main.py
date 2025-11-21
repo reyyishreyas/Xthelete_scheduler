@@ -5,11 +5,8 @@ import uvicorn
 import os
 from datetime import datetime
 import uuid
-
 from .models.schemas import *
 from .supabase_client import get_db, SupabaseClient
-
-# Import algorithms from separate files
 from .algorithms.grouping import GroupingAlgorithm
 from .algorithms.pairing import BacktrackingPairingAlgorithm
 from .algorithms.round_robin import RoundRobinRotationAlgorithm
@@ -17,7 +14,6 @@ from .algorithms.knockout import KnockoutBracketEngine
 from .algorithms.scheduling import SmartSchedulingEngine
 from .algorithms.match_code_security import MatchCodeSecurity
 
-# making fastapi
 app = FastAPI(
     title="XTHLETE Tournament Management API",
     description="Smart Fixture, Scheduling & Match Management System - Python FastAPI Backend with Supabase",
@@ -26,7 +22,6 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -694,13 +689,10 @@ async def validate_match_code(request: ValidateCodeRequest):
 async def get_statistics(db: SupabaseClient = Depends(get_db)):
     """Get system statistics"""
     try:
-        # Get counts
         players = await db.get_all("players")
         clubs = await db.get_all("clubs")
         tournaments = await db.get_all("tournaments")
         matches = await db.get_all("matches")
-        
-        # Get security stats
         security_stats = match_security.get_statistics()
         
         stats = {
