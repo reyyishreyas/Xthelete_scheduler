@@ -15,10 +15,9 @@ class MatchCodeSecurity:
     
     def __init__(self):
         self.CODE_EXPIRY_MINUTES = 60  # Code expires after 60 minutes
-        self.CODE_LENGTH = 32  # Length of generated code
-        self.SALT = 'XTHLETE_MATCH_SECURITY_2024'  # Salt for hashing
-        
-        # In-memory storage for active codes (in production, use Redis or database)
+        self.CODE_LENGTH = 32  
+        self.SALT = 'XTHLETE_MATCH_SECURITY_2024'  
+    
         self.active_codes = {}
         self.used_codes = set()
 
@@ -39,7 +38,7 @@ class MatchCodeSecurity:
 
         return {
             'match_id': match_id,
-            'player_ids': sorted(player_ids),  # Sort for consistency
+            'player_ids': sorted(player_ids),  
             'court_id': court_id,
             'timestamp': now,
             'tournament_id': tournament_id,
@@ -97,8 +96,7 @@ class MatchCodeSecurity:
         if now > match_data['expires_at']:
             del self.active_codes[code]
             return {'is_valid': False, 'error': 'Code has expired', 'is_expired': True}
-
-        # Additional validation: verify hash integrity
+            
         if '-' not in code:
             return {'is_valid': False, 'error': 'Invalid code format'}
 
@@ -123,8 +121,6 @@ class MatchCodeSecurity:
         validation = self.validate_match_code(code)
         if not validation['is_valid']:
             return False
-
-        # Move from active to used codes
         if code in self.active_codes:
             del self.active_codes[code]
         self.used_codes.add(code)
