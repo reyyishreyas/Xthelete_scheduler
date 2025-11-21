@@ -3,12 +3,6 @@ from datetime import datetime
 
 
 class KnockoutBracketEngine:
-    """
-    Knockout Bracket Engine
-    
-    Time Complexity: O(n log n)
-    Space Complexity: O(n)
-    """
     
     def generate_bracket(self, players: List[Dict], tournament_name: str) -> Dict:
         """Generate knockout bracket"""
@@ -92,7 +86,6 @@ class KnockoutBracketEngine:
         
         matches.append(first_round_matches)
         
-        # Create subsequent rounds
         for round_num in range(2, num_rounds + 1):
             round_matches = []
             num_matches_in_round = len(first_round_matches) // (2 ** (round_num - 2))
