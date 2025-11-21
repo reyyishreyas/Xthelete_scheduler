@@ -17,7 +17,7 @@ from .algorithms.knockout import KnockoutBracketEngine
 from .algorithms.scheduling import SmartSchedulingEngine
 from .algorithms.match_code_security import MatchCodeSecurity
 
-# Create FastAPI app
+# making fastapi
 app = FastAPI(
     title="XTHLETE Tournament Management API",
     description="Smart Fixture, Scheduling & Match Management System - Python FastAPI Backend with Supabase",
@@ -26,7 +26,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Configure CORS for frontend
+# frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -35,14 +35,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize algorithms
+# basic algos
 grouping_algorithm = GroupingAlgorithm()
 pairing_algorithm = BacktrackingPairingAlgorithm()
 round_robin_engine = RoundRobinRotationAlgorithm()
 knockout_engine = KnockoutBracketEngine()
 match_security = MatchCodeSecurity()
 
-# Health check endpoint
+# checking if the fastapi is working or not
 @app.get("/health", response_model=APIResponse)
 async def health_check():
     return APIResponse(
@@ -67,7 +67,7 @@ async def get_clubs(db: SupabaseClient = Depends(get_db)):
 async def create_club(club: ClubCreate, db: SupabaseClient = Depends(get_db)):
     """Create a new club"""
     try:
-        # Check if club already exists
+
         existing_clubs = await db.get_all("clubs", filters={"name": club.name})
         if existing_clubs:
             raise HTTPException(
@@ -82,7 +82,7 @@ async def create_club(club: ClubCreate, db: SupabaseClient = Depends(get_db)):
                 detail="Club with this code already exists"
             )
         
-        # Create club
+        # Creating clubs here!!!
         club_data = {
             "id": str(uuid.uuid4()),
             "name": club.name,
@@ -419,10 +419,8 @@ async def create_match(match: MatchCreate, db: SupabaseClient = Depends(get_db))
         }
         
         new_match = await db.insert("matches", match_data)
-        
-        # Generate match security code if both players exist
         player_ids = [match.player1_id, match.player2_id]
-        player_ids = [pid for pid in player_ids if pid]  # Remove None values
+        player_ids = [pid for pid in player_ids if pid]
         
         if player_ids:
             match_code_result = match_security.generate_match_code(
