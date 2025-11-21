@@ -1,19 +1,28 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from typing import List, Optional
 import uvicorn
 import os
-from datetime import datetime
 import uuid
+from datetime import datetime
+import pandas as pd
+import io
+import csv
+
 from .models.schemas import *
 from .supabase_client import get_db, SupabaseClient
+
+# Import algorithms from separate files
 from .algorithms.grouping import GroupingAlgorithm
 from .algorithms.pairing import BacktrackingPairingAlgorithm
 from .algorithms.round_robin import RoundRobinRotationAlgorithm
 from .algorithms.knockout import KnockoutBracketEngine
 from .algorithms.scheduling import SmartSchedulingEngine
 from .algorithms.match_code_security import MatchCodeSecurity
+from .algorithms.csv_registration import CSVRegistrationService
 
+# Create FastAPI app
 app = FastAPI(
     title="XTHLETE Tournament Management API",
     description="Smart Fixture, Scheduling & Match Management System - Python FastAPI Backend with Supabase",
@@ -22,6 +31,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Configure CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -30,14 +40,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# basic algos
+# Initialize algorithms
 grouping_algorithm = GroupingAlgorithm()
 pairing_algorithm = BacktrackingPairingAlgorithm()
 round_robin_engine = RoundRobinRotationAlgorithm()
 knockout_engine = KnockoutBracketEngine()
 match_security = MatchCodeSecurity()
+csv_service = CSVRegistrationService()
 
-# checking if the fastapi is working or not
+# Health check endpoint
 @app.get("/health", response_model=APIResponse)
 async def health_check():
     return APIResponse(
@@ -62,7 +73,7 @@ async def get_clubs(db: SupabaseClient = Depends(get_db)):
 async def create_club(club: ClubCreate, db: SupabaseClient = Depends(get_db)):
     """Create a new club"""
     try:
-
+        # Check if club already exists
         existing_clubs = await db.get_all("clubs", filters={"name": club.name})
         if existing_clubs:
             raise HTTPException(
@@ -77,7 +88,7 @@ async def create_club(club: ClubCreate, db: SupabaseClient = Depends(get_db)):
                 detail="Club with this code already exists"
             )
         
-        # Creating clubs here!!!
+        # Create club
         club_data = {
             "id": str(uuid.uuid4()),
             "name": club.name,
@@ -414,8 +425,10 @@ async def create_match(match: MatchCreate, db: SupabaseClient = Depends(get_db))
         }
         
         new_match = await db.insert("matches", match_data)
+        
+        # Generate match security code if both players exist
         player_ids = [match.player1_id, match.player2_id]
-        player_ids = [pid for pid in player_ids if pid]
+        player_ids = [pid for pid in player_ids if pid]  # Remove None values
         
         if player_ids:
             match_code_result = match_security.generate_match_code(
@@ -548,8 +561,8 @@ async def generate_round_robin(request: PairingRequest, db: SupabaseClient = Dep
         )
 
 @app.post("/api/algorithms/knockout", response_model=APIResponse)
-async def generate_knockout_bracket(request: PairingRequest, db: SupabaseClient = Depends(get_db)):
-    """Generate knockout bracket"""
+async def generate_knockout_bracket(request: KnockoutRequest, db: SupabaseClient = Depends(get_db)):
+    """Generate knockout bracket with dynamic seeding"""
     try:
         # Get players from database
         players = await db.get_all("players", filters={"id": request.player_ids})
@@ -560,8 +573,13 @@ async def generate_knockout_bracket(request: PairingRequest, db: SupabaseClient 
                 detail="No players found"
             )
         
-        # Apply knockout algorithm
-        result = knockout_engine.generate_bracket(players, "Tournament")
+        # Apply knockout algorithm with dynamic seeding
+        result = knockout_engine.generate_bracket(
+            players, 
+            request.tournament_name or "Tournament",
+            request.seeding_method or "performance",
+            request.performance_data
+        )
         
         return APIResponse(success=True, data=result)
         
@@ -684,15 +702,299 @@ async def validate_match_code(request: ValidateCodeRequest):
             detail=str(e)
         )
 
+# CSV Registration endpoints
+@app.get("/api/csv/upload-template", response_model=APIResponse)
+async def download_csv_template():
+    """Download CSV template for player registration"""
+    try:
+        csv_content = csv_service.export_registration_template()
+        
+        def iterfile():
+            yield csv_content.encode('utf-8')
+        
+        return StreamingResponse(
+            iterfile(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=player_registration_template.csv"}
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/api/csv/validate", response_model=APIResponse)
+async def validate_csv(file: UploadFile = File(...)):
+    """Validate CSV structure and content"""
+    try:
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only CSV files are allowed"
+            )
+        
+        # Read file content
+        content = await file.read()
+        csv_content = content.decode('utf-8')
+        
+        # Validate CSV structure
+        validation_result = csv_service.validate_csv_structure(csv_content)
+        
+        if not validation_result['valid']:
+            return APIResponse(
+                success=False,
+                data=validation_result
+            )
+        
+        # Parse and validate data
+        valid_rows, error_rows = csv_service.parse_csv_data(csv_content)
+        
+        return APIResponse(
+            success=True,
+            data={
+                'validation': validation_result,
+                'data_validation': {
+                    'valid_rows': len(valid_rows),
+                    'error_rows': len(error_rows),
+                    'sample_valid_rows': valid_rows[:3],
+                    'error_details': error_rows[:10]  # Show first 10 errors
+                }
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/api/csv/register-players", response_model=APIResponse)
+async def register_players_from_csv(
+    file: UploadFile = File(...),
+    club_id: str = Form(...),
+    event_ids: Optional[str] = Form(None),
+    db: SupabaseClient = Depends(get_db)
+):
+    """Register players from CSV with automatic event registration"""
+    try:
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only CSV files are allowed"
+            )
+        
+        # Verify club exists
+        club = await db.get_by_id("clubs", club_id)
+        if not club:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Club not found"
+            )
+        
+        # Parse event IDs
+        target_event_ids = []
+        if event_ids:
+            target_event_ids = [eid.strip() for eid in event_ids.split(',') if eid.strip()]
+        
+        # Validate events exist
+        if target_event_ids:
+            events = await db.get_all("events", filters={"id": target_event_ids})
+            found_event_ids = {event['id'] for event in events}
+            missing_events = set(target_event_ids) - found_event_ids
+            
+            if missing_events:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Events not found: {', '.join(missing_events)}"
+                )
+        
+        # Read and parse CSV
+        content = await file.read()
+        csv_content = content.decode('utf-8')
+        
+        # Validate CSV structure
+        validation_result = csv_service.validate_csv_structure(csv_content)
+        if not validation_result['valid']:
+            return APIResponse(
+                success=False,
+                data=validation_result
+            )
+        
+        # Parse data
+        valid_rows, error_rows = csv_service.parse_csv_data(csv_content)
+        
+        if not valid_rows:
+            return APIResponse(
+                success=False,
+                data={
+                    'message': 'No valid players found in CSV',
+                    'errors': error_rows
+                }
+            )
+        
+        # Prepare player data
+        prepared_players = csv_service.prepare_player_data(valid_rows, club_id)
+        
+        # Check existing players
+        existing_players = await db.get_all("players")
+        new_players, duplicate_players = csv_service.check_existing_players(
+            prepared_players, existing_players
+        )
+        
+        # Register new players
+        registered_players = []
+        registration_errors = []
+        
+        for player in new_players:
+            try:
+                player_data = player.copy()
+                player_data['id'] = str(uuid.uuid4())
+                registered_player = await db.insert("players", player_data)
+                if registered_player:
+                    registered_players.append(registered_player)
+            except Exception as e:
+                registration_errors.append({
+                    'player': player,
+                    'error': str(e)
+                })
+        
+        # Register to events if specified
+        event_registrations = []
+        if target_event_ids and registered_players:
+            for player in registered_players:
+                # Check existing registrations
+                existing_regs = await db.get_all("registrations", filters={
+                    "player_id": player['id']
+                })
+                
+                reg_validation = csv_service.validate_event_registrations(
+                    player['id'], target_event_ids, existing_regs
+                )
+                
+                # Create new registrations
+                for reg_data in reg_validation['new_registrations']:
+                    try:
+                        registration = await db.insert("registrations", {
+                            **reg_data,
+                            'id': str(uuid.uuid4())
+                        })
+                        if registration:
+                            event_registrations.append(registration)
+                    except Exception as e:
+                        registration_errors.append({
+                            'type': 'event_registration',
+                            'player_id': player['id'],
+                            'event_id': reg_data['event_id'],
+                            'error': str(e)
+                        })
+        
+        # Generate summary
+        summary = csv_service.generate_registration_summary(
+            validation_result,
+            {
+                'valid_players': registered_players,
+                'duplicate_players': duplicate_players,
+                'event_registrations': event_registrations,
+                'clubs': [club],
+                'errors': registration_errors
+            }
+        )
+        
+        return APIResponse(
+            success=summary['success'],
+            data={
+                'summary': summary,
+                'registered_players': registered_players,
+                'duplicate_players': duplicate_players,
+                'event_registrations': event_registrations,
+                'errors': registration_errors
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.get("/api/csv/registration-status/{club_id}", response_model=APIResponse)
+async def get_registration_status(club_id: str, db: SupabaseClient = Depends(get_db)):
+    """Get registration status for a club"""
+    try:
+        # Get club info
+        club = await db.get_by_id("clubs", club_id)
+        if not club:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Club not found"
+            )
+        
+        # Get all players for this club
+        players = await db.get_all("players", filters={"club_id": club_id})
+        
+        # Get registrations for these players
+        player_ids = [p['id'] for p in players]
+        registrations = []
+        if player_ids:
+            registrations = await db.get_all("registrations", filters={"player_id": player_ids})
+        
+        # Get available events
+        events = await db.get_all("events")
+        
+        # Calculate registration statistics
+        total_players = len(players)
+        registered_players = len(set(r['player_id'] for r in registrations))
+        unregistered_players = total_players - registered_players
+        
+        # Event registration breakdown
+        event_stats = {}
+        for event in events:
+            event_regs = [r for r in registrations if r['event_id'] == event['id']]
+            event_stats[event['id']] = {
+                'event_name': event['name'],
+                'registered_count': len(event_regs),
+                'registered_players': event_regs
+            }
+        
+        return APIResponse(
+            success=True,
+            data={
+                'club': club,
+                'statistics': {
+                    'total_players': total_players,
+                    'registered_players': registered_players,
+                    'unregistered_players': unregistered_players,
+                    'registration_rate': (registered_players / total_players * 100) if total_players > 0 else 0
+                },
+                'event_registrations': event_stats,
+                'recent_registrations': registrations[-10:]  # Last 10 registrations
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
 # Statistics endpoint
 @app.get("/api/statistics", response_model=APIResponse)
 async def get_statistics(db: SupabaseClient = Depends(get_db)):
     """Get system statistics"""
     try:
+        # Get counts
         players = await db.get_all("players")
         clubs = await db.get_all("clubs")
         tournaments = await db.get_all("tournaments")
         matches = await db.get_all("matches")
+        
+        # Get security stats
         security_stats = match_security.get_statistics()
         
         stats = {
