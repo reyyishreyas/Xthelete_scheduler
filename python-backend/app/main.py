@@ -2,21 +2,20 @@ from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import uvicorn
-from app.models.schemas import RegistrationBase
 import os
 from datetime import datetime
 import uuid
 
 from .models.schemas import *
 from .supabase_client import get_db, SupabaseClient
-from .algorithms.tournament_algorithms import (
-    GroupingAlgorithm, 
-    BacktrackingPairingAlgorithm, 
-    SmartSchedulingEngine,
-    MatchCodeSecurity,
-    RoundRobinRotationAlgorithm,
-    KnockoutBracketEngine
-)
+
+# Import algorithms from separate files
+from .algorithms.grouping import GroupingAlgorithm
+from .algorithms.pairing import BacktrackingPairingAlgorithm
+from .algorithms.round_robin import RoundRobinRotationAlgorithm
+from .algorithms.knockout import KnockoutBracketEngine
+from .algorithms.scheduling import SmartSchedulingEngine
+from .algorithms.match_code_security import MatchCodeSecurity
 
 # Create FastAPI app
 app = FastAPI(
@@ -39,10 +38,9 @@ app.add_middleware(
 # Initialize algorithms
 grouping_algorithm = GroupingAlgorithm()
 pairing_algorithm = BacktrackingPairingAlgorithm()
-scheduling_engine = SmartSchedulingEngine()
-match_security = MatchCodeSecurity()
 round_robin_engine = RoundRobinRotationAlgorithm()
 knockout_engine = KnockoutBracketEngine()
+match_security = MatchCodeSecurity()
 
 # Health check endpoint
 @app.get("/health", response_model=APIResponse)
@@ -64,11 +62,6 @@ async def get_clubs(db: SupabaseClient = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-
-@app.post("/registrations", response_model=APIResponse)
-async def register_player(data: RegistrationCreate):
-    result = supabase.table("registrations").insert(data.model_dump()).execute()
-    return APIResponse(success=True, data=result.data)
 
 @app.post("/api/clubs", response_model=APIResponse)
 async def create_club(club: ClubCreate, db: SupabaseClient = Depends(get_db)):
@@ -496,13 +489,8 @@ async def group_players(request: GroupingRequest, db: SupabaseClient = Depends(g
                 detail="No players found"
             )
         
-        # Convert to algorithm format
-        algorithm_players = [
-            AlgorithmPlayer(**player) for player in players
-        ]
-        
         # Apply grouping algorithm
-        result = grouping_algorithm.group_players(algorithm_players, request.num_groups)
+        result = grouping_algorithm.group_players(players, request.num_groups)
         
         return APIResponse(success=True, data=result)
         
@@ -527,13 +515,8 @@ async def generate_pairings(request: PairingRequest, db: SupabaseClient = Depend
                 detail="No players found"
             )
         
-        # Convert to algorithm format
-        algorithm_players = [
-            AlgorithmPlayer(**player) for player in players
-        ]
-        
         # Apply pairing algorithm
-        result = pairing_algorithm.generate_pairings(algorithm_players)
+        result = pairing_algorithm.generate_pairings(players)
         
         return APIResponse(success=True, data=result)
         
@@ -558,13 +541,8 @@ async def generate_round_robin(request: PairingRequest, db: SupabaseClient = Dep
                 detail="No players found"
             )
         
-        # Convert to algorithm format
-        algorithm_players = [
-            AlgorithmPlayer(**player) for player in players
-        ]
-        
         # Apply round robin algorithm
-        result = round_robin_engine.generate_round_robin(algorithm_players)
+        result = round_robin_engine.generate_round_robin(players)
         
         return APIResponse(success=True, data=result)
         
@@ -589,13 +567,8 @@ async def generate_knockout_bracket(request: PairingRequest, db: SupabaseClient 
                 detail="No players found"
             )
         
-        # Convert to algorithm format
-        algorithm_players = [
-            AlgorithmPlayer(**player) for player in players
-        ]
-        
         # Apply knockout algorithm
-        result = knockout_engine.generate_bracket(algorithm_players, "Tournament")
+        result = knockout_engine.generate_bracket(players, "Tournament")
         
         return APIResponse(success=True, data=result)
         
@@ -637,22 +610,17 @@ async def schedule_matches(request: SchedulingRequest, db: SupabaseClient = Depe
                 player2 = await db.get_by_id("players", match["player2_id"])
                 
                 if player1 and player2:
-                    algorithm_match = AlgorithmMatch(
-                        player1=AlgorithmPlayer(**player1),
-                        player2=AlgorithmPlayer(**player2),
-                        penalty=1 if player1["club_id"] == player2["club_id"] else 0
-                    )
+                    algorithm_match = {
+                        'player1': player1,
+                        'player2': player2,
+                        'penalty': 1 if player1["club_id"] == player2["club_id"] else 0
+                    }
                     algorithm_matches.append(algorithm_match)
-        
-        # Convert courts to algorithm format
-        court_schemas = [
-            Court(**court) for court in courts
-        ]
         
         # Apply scheduling algorithm
         constraints = request.constraints.dict() if request.constraints else {}
         scheduling_engine = SmartSchedulingEngine(constraints)
-        result = scheduling_engine.schedule_matches(algorithm_matches, court_schemas, request.start_time)
+        result = scheduling_engine.schedule_matches(algorithm_matches, courts, request.start_time)
         
         # Update matches with scheduled times
         for scheduled_match in result["scheduled_matches"]:
