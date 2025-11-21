@@ -44,12 +44,9 @@ class BacktrackingPairingAlgorithm:
         """Try to find optimal pairing using backtracking"""
         if current_matches is None:
             current_matches = []
-
         # Prune if current penalty already exceeds best found
         if self.best_result and current_penalty >= self.best_result['total_penalty']:
             return
-
-        # Base case: all players paired
         if len(players) == 0:
             result = {
                 'matches': current_matches.copy(),
@@ -72,18 +69,13 @@ class BacktrackingPairingAlgorithm:
             if not self.best_result or current_penalty < self.best_result['total_penalty']:
                 self.best_result = result
             return
-
-        # Memoization: skip if we've seen this state with better or equal penalty
         state_key = self.generate_state_key(players)
         if state_key in self.visited_states:
             return
         self.visited_states.add(state_key)
-
-        # Fix first player and try pairing with others
         first_player = players[0]
         remaining_players = players[1:]
 
-        # If only one player left, they get a BYE
         if len(remaining_players) == 0:
             bye_player = self.create_bye_player()
             match = {
@@ -99,8 +91,6 @@ class BacktrackingPairingAlgorithm:
                 depth + 1
             )
             return
-
-        # Try pairing first player with each remaining player
         for i, second_player in enumerate(remaining_players):
             match_penalty = self.calculate_match_penalty(first_player, second_player)
             
@@ -109,10 +99,8 @@ class BacktrackingPairingAlgorithm:
                 'player2': second_player,
                 'penalty': match_penalty
             }
-
             # Create new list of remaining players (remove both paired players)
             new_remaining = remaining_players[:i] + remaining_players[i+1:]
-
             # Recursively try to pair the rest
             self.find_optimal_pairing(
                 new_remaining,
@@ -120,7 +108,6 @@ class BacktrackingPairingAlgorithm:
                 current_penalty + match_penalty,
                 depth + 1
             )
-
         # Clean up visited state for this branch
         self.visited_states.discard(state_key)
 
@@ -138,7 +125,6 @@ class BacktrackingPairingAlgorithm:
         self.best_result = None
         self.visited_states.clear()
 
-        # Sort players by club and name for consistent results
         sorted_players = sorted(players, key=lambda p: (p['club_id'], p['name']))
 
         # Start backtracking
